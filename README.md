@@ -1,4 +1,4 @@
-# ⚡ AniShift Server 3 Abyss Cloud Worker (`media-processor`)
+# 🎯 AniShift Server 3 Custom Anime Cloud Worker (`media-processor-Custom`)
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-Cloud_CI%2FCD-2088FF?style=for-the-badge&logo=github-actions&logoColor=white)](https://github.com/features/actions)
@@ -8,31 +8,32 @@
 [![Faster Whisper](https://img.shields.io/badge/Faster_Whisper-AI_Speech_Recognition-blueviolet?style=for-the-badge)](https://github.com/SYSTRAN/faster-whisper)
 [![Firebase](https://img.shields.io/badge/Firebase-Firestore_%26_RTDB-FFCA28?style=for-the-badge&logo=firebase&logoColor=black)](https://firebase.google.com/)
 
-A cloud-native, high-speed automated anime ingestion pipeline for **AniShift Server 3 (Abyss Stream)**. Handles both ongoing releases and automated backlog queue processing by leveraging GitHub Actions ephemeral cloud runners (1Gbps+ Azure network, 14GB SSD, 7GB RAM).
+A dedicated cloud processing pipeline engineered exclusively for **AniShift Server 3 Custom & Requested Anime Series/Movies**. Running on a separate, dedicated GitHub Actions repository ensures that user-requested custom anime jobs are processed immediately without queuing behind massive backlog or ongoing tasks.
 
 ---
 
 ## ⚡ Key Highlights
 
-* **Automated Cloud Dispatch**:
-  * VPS bots (`abuploader.py` and `ongoing_abuploader.py`) listen for pending episodes and trigger jobs via GitHub `repository_dispatch` (`start_upload_job`).
+* **Dedicated High-Priority Pipeline**:
+  * Connected to `csuploader.py` (`Abyss-Custom-B1`) on the VPS. Custom jobs (`sever_3_job` node) are dispatched instantly to their own independent cloud runner pool.
+* **Concurrency & Load Isolation**:
+  * Operates completely decoupled from main backlog workers (`abuploader.py`), preventing runner exhaustion and job starvation.
 * **Cloudflare WARP Bypassing**:
-  * Automatically sets up and connects `cloudflare-warp` in local SOCKS5 proxy mode (port `40000`) on the runner to bypass torrent ISP blocks, trackers, and API limits.
-* **High-Speed Torrent Ingestion**:
-  * Downloads video files rapidly using `aria2c` with DHT support, with automatic loop fallback across configured `backup_magnets`.
-* **Smart Dual-Audio Management**:
-  * Uses `ffprobe` to detect multi-audio containers and automatically selects the original Japanese audio track while discarding unnecessary dub tracks.
-* **Intelligent Subtitle Pipeline**:
-  * Extracts embedded soft subtitles from MKV/MP4 using `ffmpeg`.
-  * Cleans ASS/VTT formatting, vector drawing tags, and RTL markers.
-  * Translates English dialogue to natural Sinhala using the custom Spoken Sinhala dictionary (`spoken_dict.py`).
-  * Seamlessly falls back to `faster-whisper` AI speech recognition if subtitles are missing.
-* **Abyss API Ingestion & Subtitle Attachment**:
-  * Uploads video to Abyss CDN (`https://up.abyss.to/`).
-  * Attaches the translated Sinhala subtitle directly to the Abyss stream via Abyss REST API.
-  * Updates Firestore (`anime_series` / `anime_movies`) with `status: 'uploaded'`, Abyss embed link, and metadata.
-* **Zero-Waste Disk Lifecycle**:
-  * All downloaded videos and temporary files are purged immediately upon upload completion.
+  * Establishes a local SOCKS5 proxy via `cloudflare-warp` on port `40000` to guarantee uninterrupted torrent peer discovery, tracker communication, and API reachability.
+* **Resilient Torrent Ingestion (`aria2c`)**:
+  * High-speed parallel chunk downloading with automated failover through the configured `backup_magnets` list.
+* **Smart Dual-Audio Stream Filtering**:
+  * Automatically inspects audio streams with `ffprobe`, isolates Japanese voice tracks, and strips redundant foreign dubs for a clean viewing experience.
+* **Integrated Subtitle Translation & AI Transcription**:
+  * Extracts embedded subtitles from video files via `ffmpeg`.
+  * Translates to natural conversational Sinhala using the custom Spoken Sinhala dictionary (`spoken_dict.py`).
+  * Automatic `faster-whisper` AI fallback generates accurate subtitles if no native subtitle tracks are present.
+* **Direct Abyss Upload & API Attachment**:
+  * Streams the processed video to Abyss CDN (`https://up.abyss.to/`).
+  * Attaches the translated Sinhala subtitle directly to the video via Abyss REST API.
+  * Real-time Firestore document updates (`status: 'uploaded'`, Abyss embed URL, episode metadata) and RTDB worker status reporting.
+* **Zero-Waste Disk Management**:
+  * Cleans up all working directories and temporary video segments immediately after upload.
 
 ---
 
@@ -40,13 +41,13 @@ A cloud-native, high-speed automated anime ingestion pipeline for **AniShift Ser
 
 ```mermaid
 graph TD
-    A[Admin Panel / RTDB: Backlog & Ongoing Queue] -->|Polls Queue| B[VPS: abuploader.py / ongoing_abuploader.py]
+    A[Admin Panel / RTDB: sever_3_job Custom Queue] -->|Polls Queue| B[VPS: csuploader.py - Abyss-Custom-B1]
     B -->|repository_dispatch: start_upload_job| C[GitHub Actions: worker.yml]
     
     subgraph Cloud Runner 2 vCPU / 7GB RAM / 14GB SSD / 1Gbps Azure
         C --> D[Initialize Cloudflare WARP SOCKS5:40000]
         D --> E[worker.py Execution]
-        E -->|aria2c| F[Download Anime Torrent / Backup Magnets]
+        E -->|aria2c| F[Download Custom Episode / Backup Magnets]
         F --> G[Extract Embedded Subtitles via ffmpeg]
         G --> H[Translate to Sinhala using spoken_dict.py]
         G -.->|Fallback if no sub| I[faster-whisper AI Transcription]
@@ -75,7 +76,7 @@ Add the following secret keys under your GitHub Repository **Settings -> Secrets
 | `ABYSS_PASSWORD` | *(Optional Fallback)* Abyss Account Password | `********` |
 
 > [!NOTE]
-> The VPS uploaders (`abuploader.py`, `ongoing_abuploader.py`) dynamically pass the active Abyss credentials in `JOB_PAYLOAD` per job. The fallback environment variables are only used if the payload omits them.
+> `csuploader.py` dynamically supplies the designated Abyss account credentials with each dispatch payload. The secret fallback variables serve as backup protection.
 
 ---
 
@@ -94,15 +95,14 @@ Add the following secret keys under your GitHub Repository **Settings -> Secrets
 
 ## 🚀 Running on VPS via PM2
 
-To run the associated Abyss VPS bots:
+To start the custom anime uploader daemon on your VPS:
 
 ```bash
-# Start Abyss Backlog Uploaders
-pm2 start abuploader.py --name "Abyss-Auto-B1" --interpreter python3
-pm2 start abuploader.py --name "Abyss-Auto-B2" --interpreter python3
+# Navigate to abyss_uploader directory
+cd abyss_uploader
 
-# Start Abyss Ongoing Uploaders
-pm2 start ongoing_abuploader.py --name "Abyss-Ongoing-B1" --interpreter python3
+# Start with PM2
+pm2 start csuploader.py --name "Abyss-Custom-B1" --interpreter python3
 
 # Save PM2 process list
 pm2 save
